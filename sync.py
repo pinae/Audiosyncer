@@ -1,20 +1,16 @@
 from moviepy.editor import *
 from moviepy.audio.AudioClip import AudioArrayClip
 import numpy as np
+import argparse
+import re
 
 
-def correlate(sample, base):
+def correlate_by_squared_difference(base, sample):
     fitness = []
     for offset in range(len(base) - len(sample)):
         window = base[offset:offset+len(sample)]
         fitness.append(np.sum((window - sample) ** 2))
-    best_fitness = fitness[0]
-    best_offset = 0
-    for offset, f in enumerate(fitness):
-        if f < best_fitness:
-            best_fitness = f
-            best_offset = offset
-    return best_offset
+    return np.argmin(np.array(fitness))
 
 
 def mix(offset, original, better):
@@ -24,16 +20,61 @@ def mix(offset, original, better):
     return original
 
 
-if __name__ == "__main__":
-    low_quality_sound = AudioFileClip("sample_mono.mp3")
-    high_quality_sound = AudioFileClip("sample_mono.mp3")
+def create_interface():
+    print("We need an interface.")
+
+
+def correlate(clip_filename, audio, output_filename):
+    match = re.search("^\w+\.(mp3|wav|flac|ogg)$", clip_filename, re.IGNORECASE)
+    save_video = True
+    if match:
+        low_quality_sound = AudioFileClip(clip_filename)
+        save_video = False
+    else:  # The file seems to be a video
+        video_clip = VideoFileClip(clip_filename)
+        low_quality_sound = video_clip.audio
+    high_quality_sound = AudioFileClip(audio)
+    # TODO: Convert different audio fps if necessary.
     lqsa = low_quality_sound.to_soundarray()
     hqsa = high_quality_sound.to_soundarray()
-    sample_start = 44100
-    sample_len = 1000
+    sample_len = 10000
+    sample_start = max(0, np.argmax(hqsa[:, 1]) - sample_len // 2)
     sample = hqsa[sample_start:sample_start+sample_len]
-    offset = correlate(sample, lqsa) - sample_start
-    print("Best offset: " + str(offset))
-    good_sound = AudioArrayClip(mix(offset, lqsa, hqsa), fps=44100)
-    good_sound.write_audiofile("test.wav")
+    correlation = np.correlate(lqsa[:, 1], sample[:, 1])
+    offset = np.argmax(correlation) - sample_start
+    good_sound = AudioArrayClip(mix(offset, lqsa, hqsa), fps=high_quality_sound.fps)
+    if save_video:
+        video_clip.audio = good_sound
+        video_clip.write_videofile(output_filename)
+    else:
+        good_sound.write_audiofile(output_filename)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Sync better Audio files.")
+    parser.add_argument('-c', '--clip',
+                        help="Video or audio with low quality",
+                        metavar='low_quality_clip',
+                        type=str,
+                        default='',
+                        required=False)
+    parser.add_argument('-a', '--audio',
+                        help="Audio with better quality",
+                        metavar='high_quality_audio',
+                        type=str,
+                        default='',
+                        required=False)
+    parser.add_argument('-o', '--out',
+                        help="Filename for the mixed output",
+                        metavar='output_filename',
+                        type=str,
+                        default='',
+                        required=False)
+    args = parser.parse_args()
+    if not args.clip and not args.audio and not args.out:
+        create_interface()
+    elif args.clip and args.audio and args.out:
+        correlate(args.clip, args.audio, args.out)
+    else:
+        parser.print_help()
 
