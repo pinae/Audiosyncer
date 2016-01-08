@@ -34,20 +34,27 @@ def correlate(clip_filename, audio, output_filename):
         video_clip = VideoFileClip(clip_filename)
         low_quality_sound = video_clip.audio
     high_quality_sound = AudioFileClip(audio)
-    # TODO: Convert different audio fps if necessary.
-    lqsa = low_quality_sound.to_soundarray()
-    hqsa = high_quality_sound.to_soundarray()
+    audio_fps = max(low_quality_sound.fps, high_quality_sound.fps)
+    lqsa = low_quality_sound.to_soundarray(nbytes=4, buffersize=1000, fps=audio_fps)
+    hqsa = high_quality_sound.to_soundarray(nbytes=4, buffersize=1000, fps=audio_fps)
     sample_len = 10000
     sample_start = max(0, np.argmax(hqsa[:, 1]) - sample_len // 2)
     sample = hqsa[sample_start:sample_start+sample_len]
     correlation = np.correlate(lqsa[:, 1], sample[:, 1])
     offset = np.argmax(correlation) - sample_start
-    good_sound = AudioArrayClip(mix(offset, lqsa, hqsa), fps=high_quality_sound.fps)
+    good_sound = AudioArrayClip(mix(offset, lqsa, hqsa), fps=audio_fps)
     if save_video:
         video_clip.audio = good_sound
-        video_clip.write_videofile(output_filename)
+        video_clip.write_videofile(output_filename,
+                                   codec='mpeg4',
+                                   bitrate='4000000',
+                                   audio_codec='pcm_s32le',
+                                   #audio_bitrate='500000',
+                                   preset='superslow',
+                                   threads=4)
     else:
-        good_sound.write_audiofile(output_filename)
+        good_sound.write_audiofile(output_filename,
+                                   codec='pcm_s32le')
 
 
 if __name__ == "__main__":
